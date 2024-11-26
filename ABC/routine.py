@@ -1,9 +1,8 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import random
-import matplotlib.pyplot as plt
-from itertools import permutations
 
-# 定義城市及其座標
+# 城市座標
 cities = {
     "A": (8, 3),
     "B": (50, 62),
@@ -19,132 +18,155 @@ cities = {
     "L": (74, 47)
 }
 
-city_names = list(cities.keys())  # 城市名稱列表
-N = 10  # Bee數量
-D = len(city_names) - 2  # 不固定首尾的城市數量
-max_iter = 1000  # 最大迭代次數
+# 步驟1: 初始化蜜源（計算距離矩陣）
+def create_distance_matrix(cities):
+    city_names = list(cities.keys())
+    num_cities = len(city_names)
+    distance_matrix = np.zeros((num_cities, num_cities))
+    for i, city1 in enumerate(city_names):
+        for j, city2 in enumerate(city_names):
+            if i != j:
+                distance_matrix[i, j] = np.sqrt(
+                    (cities[city1][0] - cities[city2][0])**2 + (cities[city1][1] - cities[city2][1])**2
+                )
+    return distance_matrix, city_names
 
-# 計算兩城市之間的距離
-def city_distance(city1, city2):
-    x1, y1 = cities[city1]
-    x2, y2 = cities[city2]
-    return np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+# 計算路徑總距離
+def calculate_total_distance(path, distance_matrix, city_names):
+    total = 0
+    for i in range(len(path) - 1):
+        total += distance_matrix[city_names.index(path[i])][city_names.index(path[i + 1])]
+    # 回到起點
+    total += distance_matrix[city_names.index(path[-1])][city_names.index(path[0])]
+    return total
 
-# 計算總距離
-def TtotalDistance(route):
-    distance = sum(city_distance(route[i], route[i + 1]) for i in range(len(route) - 1))
-    return distance
+# 步驟2: 雇傭蜂階段（局部搜索）
+def employed_bee_phase(paths, distance_matrix, city_names):
+    for i in range(len(paths)):
+        current_path = paths[i]
+        new_path = current_path[:]
+        # 隨機交換兩個城市生成新路徑
+        idx1, idx2 = random.sample(range(len(new_path)), 2)
+        new_path[idx1], new_path[idx2] = new_path[idx2], new_path[idx1]
+        # 更新蜜源（若新路徑更優）
+        if calculate_total_distance(new_path, distance_matrix, city_names) < calculate_total_distance(current_path, distance_matrix, city_names):
+            paths[i] = new_path
+    return paths
 
-# 隨機產生初始食物源（路徑）
-def foodsource(D):
-    middle_cities = random.sample(city_names[1:-1], D)  # 隨機選擇中間的城市
-    route = ["A"] + middle_cities + ["L"]  # 起點和終點固定
-    return route
+# 步驟3: 觀察蜂階段（根據適應度選擇蜜源）
+def onlooker_bee_phase(paths, distance_matrix, city_names, num_onlookers):
+    fitness = [1 / calculate_total_distance(path, distance_matrix, city_names) for path in paths]
+    probabilities = [f / sum(fitness) for f in fitness]
+    onlooker_paths = []
+    for _ in range(num_onlookers):
+        selected_path = random.choices(paths, weights=probabilities, k=1)[0]
+        onlooker_paths.append(selected_path)
+    return onlooker_paths
 
-# Fitness函數
-def fitness_machine(num):
-    return 1 / (1 + num) if num >= 0 else 1 + abs(num)
+# 步驟4: 偵查蜂階段（替換低效蜜源）
+def scout_bee_phase(paths, distance_matrix, city_names, scout_threshold, stagnation_counts):
+    for i in range(len(paths)):
+        if stagnation_counts[i] > scout_threshold:  # 超過卡住次數限制
+            print(f"Bee {i + 1} is stagnated. Reinitializing its path.")
+            paths[i] = random.sample(city_names, len(city_names))  # 隨機替換蜜源
+            stagnation_counts[i] = 0  # 重置卡住次數
+    return paths
 
-# 產生初始食物源
-food_source = [foodsource(D) for _ in range(N)]
+# 視覺化
+def visualize_path(cities, path, title, total_distance=None):
+    plt.figure(figsize=(8, 6))
+    for city, coord in cities.items():
+        plt.scatter(*coord, c='blue', zorder=2)
+        plt.text(coord[0] + 1, coord[1], city, fontsize=8, zorder=2)
 
-# 計算初始距離和適應度
-out_TD = [TtotalDistance(route) for route in food_source]
-fitness_list = [fitness_machine(dist) for dist in out_TD]
-trial = np.zeros(N).astype(int)
+    for i in range(len(path)):
+        start = cities[path[i]]
+        end = cities[path[(i + 1) % len(path)]]
+        plt.arrow(start[0], start[1], end[0] - start[0], end[1] - start[1], head_width=2, length_includes_head=True, color='red', alpha=0.7)
 
-# 儲存歷史最佳解
-everytime_best_route = []
-everytime_best_distance = []
+    if total_distance is not None:
+        plt.title(f"{title}\nTotal Distance: {total_distance:.2f}")
+    else:
+        plt.title(title)
+    plt.grid(True)
+    plt.show()
 
-for it in range(max_iter):
-    print(f"\n--- Iteration {it + 1} ---")
-    
-    # Employed Bee Phase
-    print("Employed Bee Phase:")
-    for i in range(N):
-        current_route = food_source[i]
-        new_route = current_route.copy()
-        swap_indices = random.sample(range(1, D + 1), 2)  # 選擇兩個隨機交換的城市（不包括起點與終點）
-        new_route[swap_indices[0]], new_route[swap_indices[1]] = (
-            new_route[swap_indices[1]],
-            new_route[swap_indices[0]],
-        )
-        new_distance = TtotalDistance(new_route)
-        new_fitness = fitness_machine(new_distance)
-        
-        # 打印每個 bee 的更新過程
-        print(f"  Bee {i + 1}: Current Route: {current_route}, Distance: {TtotalDistance(current_route)}, Fitness: {fitness_list[i]}")
-        print(f"  Bee {i + 1}: New Route: {new_route}, Distance: {new_distance}, Fitness: {new_fitness}")
-        
-        if new_fitness > fitness_list[i]:  # 更新條件
-            food_source[i] = new_route
-            fitness_list[i] = new_fitness
-            trial[i] = 0
-            print(f"  Bee {i + 1}: Route updated.")
-        else:
-            trial[i] += 1
-            print(f"  Bee {i + 1}: Route not updated.")
+# 蜂群演算法主程序
+def bee_colony_tsp(cities, max_iterations=100, num_bees=30, scout_threshold=10):
+    distance_matrix, city_names = create_distance_matrix(cities)
 
-    # Onlooker Bee Phase
-    print("\nOnlooker Bee Phase:")
-    sum_fitness = sum(fitness_list)
-    probabilities = [fitness / sum_fitness for fitness in fitness_list]
-    for i in range(N):
-        if random.random() < probabilities[i]:
-            current_route = food_source[i]
-            new_route = current_route.copy()
-            swap_indices = random.sample(range(1, D + 1), 2)
-            new_route[swap_indices[0]], new_route[swap_indices[1]] = (
-                new_route[swap_indices[1]],
-                new_route[swap_indices[0]],
-            )
-            new_distance = TtotalDistance(new_route)
-            new_fitness = fitness_machine(new_distance)
-            
-            # 打印每個 bee 的選擇過程
-            print(f"  Bee {i + 1}: Current Route: {current_route}, Distance: {TtotalDistance(current_route)}, Fitness: {fitness_list[i]}")
-            print(f"  Bee {i + 1}: New Route: {new_route}, Distance: {new_distance}, Fitness: {new_fitness}")
-            
-            if new_fitness > fitness_list[i]:
-                food_source[i] = new_route
-                fitness_list[i] = new_fitness
-                trial[i] = 0
-                print(f"  Bee {i + 1}: Route updated.")
+    # 初始化蜜蜂群體（隨機生成初始路徑）和卡住計數
+    paths = [random.sample(city_names, len(city_names)) for _ in range(num_bees)]
+    stagnation_counts = [0] * num_bees  # 每隻蜜蜂的卡住次數
+    best_path = None
+    best_distance = float("inf")
+    iteration_distances = []  # 用於記錄每次迭代的最佳距離
+
+    for iteration in range(max_iterations):
+        print(f"Iteration {iteration + 1}/{max_iterations}")
+
+        # 雇傭蜂階段
+        old_paths = paths[:]
+        paths = employed_bee_phase(paths, distance_matrix, city_names)
+        for i in range(num_bees):
+            # 如果路徑未更新，增加卡住計數
+            if paths[i] == old_paths[i]:
+                stagnation_counts[i] += 1
             else:
-                trial[i] += 1
-                print(f"  Bee {i + 1}: Route not updated.")
-        else:
-            print(f"  Bee {i + 1}: Skipped.")
+                stagnation_counts[i] = 0  # 路徑有更新，重置卡住計數
 
-    # Scout Bee Phase
-    print("\nScout Bee Phase:")
-    for i in range(N):
-        if trial[i] > D:
-            old_route = food_source[i]
-            food_source[i] = foodsource(D)
-            trial[i] = 0
-            print(f"  Bee {i + 1}: Reinitialized Route: {old_route} -> {food_source[i]}")
+        # 觀察蜂階段
+        paths = onlooker_bee_phase(paths, distance_matrix, city_names, num_bees)
 
-    # 儲存最佳解
-    best_index = np.argmax(fitness_list)
-    best_route = food_source[best_index]
-    best_distance = TtotalDistance(best_route)
-    everytime_best_route.append(best_route)
-    everytime_best_distance.append(best_distance)
+        # 偵查蜂階段
+        paths = scout_bee_phase(paths, distance_matrix, city_names, scout_threshold, stagnation_counts)
 
-    print(f"\nBest Route in Iteration {it + 1}: {best_route}")
-    print(f"Best Distance in Iteration {it + 1}: {best_distance}")
+        # 更新最優解
+        for path in paths:
+            distance = calculate_total_distance(path, distance_matrix, city_names)
+            if distance < best_distance:
+                best_path = path
+                best_distance = distance
+                print(f"  New Best Path Found: {' -> '.join(best_path)} with Distance: {best_distance:.2f}")
+
+        # 記錄當前最優距離
+        iteration_distances.append(best_distance)
+
+    # 繪製迭代過程中的最佳距離變化
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(1, max_iterations + 1), iteration_distances, marker='o', linestyle='-', color='b', label="Best Distance")
     
-    # 終止條件：只打印前兩次迭代
-    if it == 1:
-        break
+    # 標記最後一個數值
+    final_iteration = max_iterations
+    final_distance = iteration_distances[-1]
+    plt.annotate(f"{final_distance:.2f}", 
+                 (final_iteration, final_distance), 
+                 textcoords="offset points", 
+                 xytext=(-30, -10), 
+                 ha='center', 
+                 fontsize=10, 
+                 color='red', 
+                 arrowprops=dict(facecolor='red', arrowstyle='->'))
+    
+    # 添加標題和標籤
+    plt.title("Best Distance vs Iterations")
+    plt.xlabel("Iteration")
+    plt.ylabel("Best Distance")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
 
-# 打印最終最佳解
-min_best_distance = min(everytime_best_distance)
-best_index = everytime_best_distance.index(min_best_distance)
-min_best_route = everytime_best_route[best_index]
+    # 最終結果輸出
+    print("\nFinal Best Path:")
+    print(f"Best Path: {' -> '.join(best_path)}")
+    print(f"Total Distance: {best_distance:.2f}")
 
-print("\n--- Final Result ---")
-print(f"Best Overall Route: {min_best_route}")
-print(f"Best Overall Distance: {min_best_distance}")
+    return best_path, best_distance
+
+
+
+# 主程序執行
+if __name__ == "__main__":
+    best_path, best_distance = bee_colony_tsp(cities, max_iterations=800, num_bees=30, scout_threshold=30)
+    print(f"Best Path: {' -> '.join(best_path)}")
+    print(f"Total Distance: {best_distance:.2f}")
